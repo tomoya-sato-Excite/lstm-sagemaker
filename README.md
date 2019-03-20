@@ -43,7 +43,7 @@ $ ./predict.sh payload_test.csv
 curl -H 'Content-Type:application/json' -v http://localhost:8080/invocations -d '{"text":"【E・レシピ】料理のプロが作る簡単レシピ"}'
 ```
 
-推論は`decision_trees/predictor.pyで定義されます。
+推論は`decision_trees/predictor.py`で定義されます。
 
 これらの詳しい実装方法などはAWSの以下の記事などを参考にしてください。
 https://aws.amazon.com/jp/blogs/news/train-and-host-scikit-learn-models-in-amazon-sagemaker-by-building-a-scikit-docker-container/#building
