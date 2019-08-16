@@ -2,7 +2,7 @@
 # This is a Python 3 image that uses the nginx, gunicorn, flask stack
 # for serving inferences in a stable way.
 
-FROM ubuntu:16.04
+FROM ubuntu:18.04
 
 MAINTAINER Amazon AI <sage-learner@amazon.com>
 
@@ -54,8 +54,8 @@ RUN ./bin/install-mecab-ipadic-neologd -n -y
 # a significant amount of space. These optimizations save a fair amount of space in the
 # image, which reduces start up time.
 RUN wget https://bootstrap.pypa.io/get-pip.py && python3 get-pip.py && \
-    pip3 install numpy scipy scikit-learn pandas flask gevent gunicorn mecab-python3==0.7 && \
-        (cd /usr/local/lib/python3.5/dist-packages/scipy/.libs; rm *; ln ../../numpy/.libs/* .) && \
+    pip3 install numpy scipy scikit-learn keras pillow tensorflow matplotlib pandas flask gevent gunicorn mecab-python3==0.7 && \
+        (cd /usr/local/lib/python3.6/dist-packages/scipy/.libs; rm *; ln ../../numpy/.libs/* .) && \
         rm -rf /root/.cache
 
 # Set some environment variables. PYTHONUNBUFFERED keeps Python from buffering our standard
@@ -73,6 +73,6 @@ ENV PYTHONDONTWRITEBYTECODE=TRUE
 ENV PATH="/opt/program:${PATH}"
 
 # Set up the program in the image
-COPY decision_trees /opt/program
+COPY lstm /opt/program
 WORKDIR /opt/program
 

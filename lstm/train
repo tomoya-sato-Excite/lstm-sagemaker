@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+
+# A sample training component that trains a single lstm model.
+# This implementation works in File mode and makes no assumptions about the input file names.
+# Input is specified as CSV with a data point in each row and the labels in the first column.
+
+from __future__ import print_function
+
+import os
+import sys
+import traceback
+import random
+import pickle
+import numpy as np
+import pandas as pd
+from keras.callbacks import LambdaCallback
+from keras.models import Sequential
+from keras.layers import Dense, Activation, LSTM
+from keras.optimizers import RMSprop
+from keras.utils.data_utils import get_file
+import matplotlib.pyplot as plt
+
+from dataset import TitleDataset
+
+# These are the paths to where SageMaker mounts interesting things in your container.
+
+prefix = '/opt/ml/'
+
+input_path = f'{prefix}input/data'
+model_path = os.path.join(prefix, 'model')
+output_path = os.path.join(prefix, 'output')
+# This algorithm has a single channel of input data called 'training'. Since we run in
+# File mode, the input files are copied to the directory specified here.
+channel_name = 'training'
+training_path = os.path.join(input_path, channel_name)
+
+
+# The function to execute the training.
+def train():
+    print('Starting the training.')
+    try:
+        csv_file = f'{training_path}/lorie.csv'
+        dataset = TitleDataset(csv_file)
+        print(f'corpus length: {len(dataset.titles)}')
+        print(f'total chars: {len(dataset.chars)}')
+        print(f'nb sequences: {len(dataset)}')
+        x, y = dataset.vectorize(dataset.sentences)
+
+        # build the model: a single LSTM
+        print('Build model...')
+        model = build_model(
+            input_shape=(dataset.max_len, len(dataset.chars)),
+            dense_size=len(dataset.chars)
+        )
+
+        optimizer = RMSprop(lr=0.01)
+        model.compile(loss='categorical_crossentropy', optimizer=optimizer)
+
+        print_callback = LambdaCallback(on_epoch_end=bind_on_epoch_end(dataset, model))
+
+        history = model.fit(x, y,
+                            batch_size=128,
+                            epochs=60,
+                            callbacks=[print_callback])
+
+        model.save_weights(f'{model_path}/model_weights.hdf5')
+        with open(f'{model_path}/model_architecture.json', 'w') as f:
+            f.write(model.to_json())
+        with open(f'{model_path}/model_dataset.pickle', 'wb') as f:
+            pickle.dump(dataset, f)
+
+        # Plot Training loss & Validation Loss
+        loss = history.history['loss']
+        epochs = range(1, len(loss) + 1)
+        plt.plot(epochs, loss, 'bo', label='Training loss')
+        plt.title('Training loss')
+        plt.legend()
+        plt.savefig(f'{model_path}/loss.png')
+        plt.close()
+        print('Training complete.')
+    except Exception as e:
+        # Write out an error file. This will be returned as the failureReason in the
+        # DescribeTrainingJob result.
+        trc = traceback.format_exc()
+        with open(os.path.join(output_path, 'failure'), 'w') as s:
+            s.write('Exception during training: ' + str(e) + '\n' + trc)
+        # Printing this causes the exception to be in the training job logs, as well.
+        print('Exception during training: ' + str(e) + '\n' + trc, file=sys.stderr)
+        # A non-zero exit code causes the training job to be marked as Failed.
+        sys.exit(255)
+
+
+def build_model(input_shape=(8, 1024), dense_size=1024):
+    model = Sequential()
+    model.add(LSTM(128, input_shape=input_shape))
+    model.add(Dense(dense_size))
+    model.add(Activation('softmax'))
+    return model
+
+
+def sample(preds, temperature=1.0):
+    # helper function to sample an index from a probability array
+    preds = np.asarray(preds).astype('float64')
+    preds = np.log(preds) / temperature
+    exp_preds = np.exp(preds)
+    preds = exp_preds / np.sum(exp_preds)
+    probas = np.random.multinomial(1, preds, 1)
+    return np.argmax(probas)
+
+
+def bind_on_epoch_end(dataset, model):
+    def on_epoch_end(epoch, logs):
+        # Function invoked at end of each epoch. Prints generated text.
+        print()
+        print(f'----- Generating text after Epoch: {epoch}')
+
+        start_index = 0
+        for diversity in [0.2]:
+            print(f'----- diversity: {diversity}')
+
+            generated = ''
+            sentence = dataset.titles[start_index][: dataset.max_len]
+            generated += sentence
+            print(f'----- Generating with seed: "{sentence}"')
+            sys.stdout.write(generated)
+
+            for i in range(100):
+                x_pred = np.zeros((1, dataset.max_len, len(dataset.chars)))
+                for t, char in enumerate(sentence):
+                    x_pred[0, t, dataset.char2idx[char]] = 1.0
+
+                preds = model.predict(x_pred, verbose=0)[0]
+                next_index = sample(preds, diversity)
+                next_char = dataset.idx2char[next_index]
+
+                generated += next_char
+                sentence = sentence[1:] + next_char
+
+                sys.stdout.write(next_char)
+                sys.stdout.flush()
+                if next_char == '\n':
+                    break
+            print()
+    return on_epoch_end
+
+
+if __name__ == '__main__':
+    train()
+
+    # A zero exit code causes the job to be marked a Succeeded.
+    sys.exit(0)
